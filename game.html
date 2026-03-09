@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="rw">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JORDAN EASY - BILLIARDS PRO</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&display=swap');
+        :root { --felt: #0a5c0f; --wood: #2a1506; --gold: #0a7b0a; --bg: #0a0a0b; --ui: #111113; --border: #333338; --text: #e8e4d8; }
+        * { box-sizing: border-box; margin: 0; padding: 0; touch-action: none; }
+        body { background: var(--bg); display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow: hidden; font-family: 'DM Mono', monospace; color: var(--text); }
+        
+        /* MENU */
+        #overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
+        #overlay.hidden { display: none; }
+        .menu { text-align: center; padding: 30px; background: #0f0f11; border: 1px solid var(--border); border-radius: 24px; width: 90%; max-width: 400px; }
+        .menu h1 { font-family: 'Bebas Neue', sans-serif; font-size: 50px; color: var(--gold); margin-bottom: 20px; }
+        .mode-select { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .mode-btn { padding: 12px; border: 1px solid var(--border); background: #1a1a1c; color: white; cursor: pointer; border-radius: 10px; font-size: 11px; }
+        .mode-btn.active { background: var(--gold); color: #000; font-weight: bold; }
+        .name-input { width: 100%; padding: 12px; margin: 5px 0; background: #1a1a1c; border: 1px solid var(--border); color: white; border-radius: 10px; outline: none; }
+        .start-btn { width: 100%; padding: 18px; margin-top: 15px; border: none; border-radius: 50px; background: var(--gold); color: #000; font-weight: bold; cursor: pointer; }
+
+        /* HUD */
+        #hud { width: 100%; max-width: 900px; display: flex; align-items: center; justify-content: space-around; padding: 15px 10px; }
+        .player-box { padding: 10px; border-radius: 15px; border: 2px solid var(--border); background: var(--ui); width: 150px; text-align: center; transition: 0.3s; }
+        .player-box.active { border-color: var(--gold); background: #18181b; box-shadow: 0 0 15px rgba(10, 123, 10, 0.2); }
+        .p-name { display: block; font-size: 14px; font-family: 'Bebas Neue', sans-serif; color: var(--gold); }
+        .p-group { font-size: 10px; color: #666; margin: 2px 0; }
+        .score { font-family: 'Bebas Neue', sans-serif; font-size: 28px; color: white; }
+        #status-msg { color: var(--gold); font-size: 11px; font-weight: bold; text-align: center; flex: 1; text-transform: uppercase; }
+
+        /* TABLE */
+        #table-wrap { width: 95vw; max-width: 900px; aspect-ratio: 2/1; background: var(--wood); border-radius: 15px; padding: 12px; box-shadow: 0 25px 60px rgba(0,0,0,0.8); border: 4px solid #1a0d04; }
+        #table-inner { width: 100%; height: 100%; background: var(--felt); position: relative; overflow: hidden; border-radius: 5px; }
+        canvas { width: 100%; height: 100%; display: block; }
+
+        /* POWER */
+        #power-bar { width: 95vw; max-width: 900px; height: 8px; background: #111; margin-top: 20px; border-radius: 10px; overflow: hidden; border: 1px solid #333; }
+        #power-fill { width: 0%; height: 100%; background: var(--gold); transition: width 0.1s; }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    <div class="menu">
+        <h1>JORDAN EASY</h1>
+        <div class="mode-select">
+            <button class="mode-btn" onclick="setMode('1P', this)">SINGLE</button>
+            <button class="mode-btn" onclick="setMode('AI', this)">VS COMPUTER</button>
+            <button class="mode-btn active" onclick="setMode('2P', this)">2 PLAYERS</button>
+        </div>
+        <input type="text" id="p1name" class="name-input" placeholder="Player 1 Name">
+        <input type="text" id="p2name" class="name-input" placeholder="Player 2 Name">
+        <button class="start-btn" onclick="handleStart()">START GAME</button>
+    </div>
+</div>
+
+<div id="hud">
+    <div class="player-box active" id="p1box">
+        <span id="p1disp" class="p-name">PLAYER 1</span>
+        <div id="p1group" class="p-group">OPEN TABLE</div>
+        <span id="p1score" class="score">0</span>
+    </div>
+    <div id="status-msg">READY TO PLAY</div>
+    <div class="player-box" id="p2box">
+        <span id="p2disp" class="p-name">PLAYER 2</span>
+        <div id="p2group" class="p-group">OPEN TABLE</div>
+        <span id="p2score" class="score">0</span>
+    </div>
+</div>
+
+<div id="table-wrap"><div id="table-inner"><canvas id="c"></canvas></div></div>
+<div id="power-bar"><div id="power-fill"></div></div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 1000, H = 500;
+canvas.width = W; canvas.height = H;
+
+const BR = 13, FRICTION = 0.985, PR = 34, MAX_POWER = 35;
+let balls = [], currentPlayer = 1, scores = {1:0, 2:0}, names = {1:"P1", 2:"P2"};
+let isMoving = false, isDragging = false, mousePos = {x:0, y:0}, powerPct = 0;
+let playerGroups = {1: null, 2: null}, ballPocketedInTurn = false;
+let gameMode = '2P';
+
+const POCKETS = [{x:0,y:0}, {x:W/2,y:0}, {x:W,y:0}, {x:0,y:H}, {x:W/2,y:H}, {x:W,y:H}];
+
+class Ball {
+    constructor(x, y, num, isWhite=false) {
+        this.x=x; this.y=y; this.num=num; this.isWhite=isWhite;
+        this.vx=0; this.vy=0; this.inPocket=false;
+        this.color = isWhite ? '#fff' : (['#fff','#f1c40f','#2980b9','#e74c3c','#8e44ad','#e67e22','#27ae60','#c0392b','#111'][num % 9]);
+        this.type = num === 0 ? 'white' : (num === 8 ? 'black' : (num < 8 ? 'solid' : 'stripe'));
+    }
+    draw() {
+        if (this.inPocket) return;
+        ctx.beginPath(); ctx.arc(this.x, this.y, BR, 0, Math.PI*2);
+        ctx.fillStyle = this.color; ctx.fill();
+        if (this.type === 'stripe') {
+            ctx.fillStyle = 'white'; ctx.fillRect(this.x-BR, this.y-4, BR*2, 8);
+        }
+        if (!this.isWhite) {
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(this.x, this.y, 6, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = 'black'; ctx.font = 'bold 9px Arial'; ctx.textAlign='center'; ctx.fillText(this.num, this.x, this.y+3);
+        }
+    }
+    update() {
+        if (this.inPocket) return;
+        this.x += this.vx; this.y += this.vy; this.vx *= FRICTION; this.vy *= FRICTION;
+        if (Math.hypot(this.vx, this.vy) < 0.1) { this.vx = 0; this.vy = 0; }
+        if (this.x < BR || this.x > W-BR) { this.vx *= -0.8; this.x = this.x < BR ? BR : W-BR; }
+        if (this.y < BR || this.y > H-BR) { this.vy *= -0.8; this.y = this.y < BR ? BR : H-BR; }
+        for (let p of POCKETS) { if (Math.hypot(this.x - p.x, this.y - p.y) < PR) this.pocket(); }
+    }
+    pocket() {
+        this.inPocket = true; this.vx = 0; this.vy = 0;
+        if (this.type === 'white') {
+            setTimeout(() => { this.x = 250; this.y = H/2; this.inPocket = false; }, 800);
+        } else if (this.type === 'black') {
+            let myGroup = playerGroups[currentPlayer];
+            let rem = balls.filter(b => !b.inPocket && b.type === myGroup).length;
+            endGame(rem === 0 ? `${names[currentPlayer]} WON!` : `${names[currentPlayer]} LOST!`);
+        } else {
+            if (!playerGroups[currentPlayer] && gameMode !== '1P') {
+                playerGroups[currentPlayer] = this.type;
+                playerGroups[currentPlayer === 1 ? 2 : 1] = this.type === 'solid' ? 'stripe' : 'solid';
+            }
+            ballPocketedInTurn = true; updateUI();
+        }
+    }
+}
+
+function setMode(mode, btn) {
+    gameMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('p2name').style.display = mode === '1P' ? 'none' : 'block';
+}
+
+function handleStart() {
+    names[1] = document.getElementById('p1name').value || "P1";
+    names[2] = document.getElementById('p2name').value || (gameMode === 'AI' ? "COMPUTER" : "P2");
+    document.getElementById('p1disp').innerText = names[1];
+    document.getElementById('p2disp').innerText = names[2];
+    document.getElementById('overlay').classList.add('hidden');
+    startGame();
+}
+
+function startGame() {
+    balls = [new Ball(250, H/2, 0, true)];
+    let n = 1;
+    for(let r=0; r<5; r++) {
+        for(let c=0; c<=r; c++) {
+            let bNum = n++;
+            if (r === 2 && c === 1) bNum = 8;
+            else if (n-1 === 8) bNum = 15;
+            balls.push(new Ball(650+r*24, (H/2-r*13)+c*26, bNum));
+        }
+    }
+    updateUI(); loop();
+}
+
+function resolveCollisions() {
+    for (let i = 0; i < balls.length; i++) {
+        for (let j = i + 1; j < balls.length; j++) {
+            let b1 = balls[i], b2 = balls[j];
+            if (b1.inPocket || b2.inPocket) continue;
+            let dx = b2.x-b1.x, dy = b2.y-b1.y, d = Math.hypot(dx, dy);
+            if (d < BR*2) {
+                let overlap = (BR*2-d)/2, nx = dx/d, ny = dy/d;
+                b1.x -= nx*overlap; b1.y -= ny*overlap; b2.x += nx*overlap; b2.y += ny*overlap;
+                let v1n = b1.vx*nx + b1.vy*ny, v2n = b2.vx*nx + b2.vy*ny, diff = v1n-v2n;
+                if (diff > 0) { b1.vx -= diff*nx; b1.vy -= diff*ny; b2.vx += diff*nx; b2.vy += diff*ny; }
+            }
+        }
+    }
+}
+
+function updateUI() {
+    for (let i = 1; i <= 2; i++) {
+        let g = playerGroups[i];
+        let rem = g ? balls.filter(b => !b.inPocket && b.type === g).length : 7;
+        document.getElementById(`p${i}score`).innerText = rem;
+        document.getElementById(`p${i}group`).innerText = g ? g.toUpperCase() : "OPEN TABLE";
+    }
+    document.getElementById('p1box').classList.toggle('active', currentPlayer === 1);
+    document.getElementById('p2box').classList.toggle('active', currentPlayer === 2);
+}
+
+function updateMouse(e) {
+    let r = canvas.getBoundingClientRect();
+    let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    mousePos = { x: (clientX-r.left)*(W/r.width), y: (clientY-r.top)*(H/r.height) };
+    if(isDragging) {
+        powerPct = Math.min(Math.hypot(balls[0].x-mousePos.x, balls[0].y-mousePos.y)*0.08 / MAX_POWER, 1);
+        document.getElementById('power-fill').style.width = (powerPct*100)+'%';
+    }
+}
+
+canvas.addEventListener('mousedown', () => { if(!isMoving) isDragging = true; });
+canvas.addEventListener('touchstart', (e) => { if(!isMoving) isDragging = true; e.preventDefault(); });
+window.addEventListener('mouseup', () => { if(isDragging) shoot(); });
+window.addEventListener('touchend', () => { if(isDragging) shoot(); });
+canvas.addEventListener('mousemove', updateMouse);
+canvas.addEventListener('touchmove', (e) => { updateMouse(e); e.preventDefault(); });
+
+function shoot() {
+    let white = balls[0], dx = mousePos.x-white.x, dy = mousePos.y-white.y, d = Math.hypot(dx, dy);
+    if (d > 10) {
+        let p = Math.min(d*0.08, MAX_POWER);
+        white.vx = (dx/d)*p; white.vy = (dy/d)*p;
+        isMoving = true; ballPocketedInTurn = false;
+    }
+    isDragging = false; document.getElementById('power-fill').style.width = '0%';
+}
+
+function runAI() {
+    if (currentPlayer !== 2 || isMoving) return;
+    setTimeout(() => {
+        let white = balls[0];
+        let targets = balls.filter(b => !b.inPocket && b.num !== 0);
+        let target = targets[Math.floor(Math.random()*targets.length)];
+        let dx = target.x - white.x, dy = target.y - white.y, d = Math.hypot(dx, dy);
+        let p = 15 + Math.random() * 15;
+        white.vx = (dx/d)*p; white.vy = (dy/d)*p;
+        isMoving = true; ballPocketedInTurn = false;
+    }, 1200);
+}
+
+function endGame(msg) { alert(msg); location.reload(); }
+
+function loop() {
+    ctx.fillStyle = '#0a5c0f'; ctx.fillRect(0,0,W,H);
+    
+    // LOGO JORDAN EASY (HAGATI MURI TABLE)
+    ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.font = "bold 22px 'DM Mono'"; ctx.fillText("JORDAN", W/2, H/2 - 45);
+    ctx.font = "bold 145px 'Bebas Neue'"; ctx.fillText("EASY", W/2, H/2 + 10);
+    ctx.restore();
+
+    // Pockets
+    ctx.fillStyle = '#050505'; 
+    POCKETS.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, PR, 0, Math.PI*2); ctx.fill(); });
+
+    // Physics
+    for(let i=0; i<3; i++) { resolveCollisions(); balls.forEach(b => b.update()); }
+    balls.forEach(b => b.draw());
+
+    // CUE STICK
+    if (isDragging) {
+        let white = balls[0], dx = mousePos.x-white.x, dy = mousePos.y-white.y;
+        let angle = Math.atan2(dy, dx), cueOff = Math.min(Math.hypot(dx, dy)*0.2, 40);
+        ctx.save(); ctx.translate(white.x, white.y); ctx.rotate(angle);
+        ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(20, 0); ctx.lineTo(180, 0);
+        ctx.strokeStyle = "rgba(255,255,255,0.2)"; ctx.stroke();
+        let grad = ctx.createLinearGradient(-300-cueOff, 0, -cueOff, 0);
+        grad.addColorStop(0, '#2a1506'); grad.addColorStop(0.8, '#5d3a1a'); grad.addColorStop(1, '#f5c842');
+        ctx.fillStyle = grad; ctx.beginPath(); ctx.roundRect(-300-cueOff, -4, 300, 8, 4); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillRect(-cueOff-5, -4, 5, 8); ctx.restore();
+    }
+
+    let moving = balls.some(b => Math.abs(b.vx) > 0.1 || Math.abs(b.vy) > 0.1);
+    if (isMoving && !moving) {
+        isMoving = false; 
+        if (!ballPocketedInTurn && gameMode !== '1P') currentPlayer = currentPlayer === 1 ? 2 : 1;
+        document.getElementById('status-msg').innerText = names[currentPlayer].toUpperCase() + "'S TURN";
+        updateUI();
+        if (gameMode === 'AI' && currentPlayer === 2) runAI();
+    }
+    requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
